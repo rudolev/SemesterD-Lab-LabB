@@ -65,8 +65,8 @@ link* list_append(link* virus_list, virus* data) {
     }
 
     link* curLink = virus_list;
-    while (curLink->nextVirus != NULL) {
-        curLink = curLink->nextVirus;
+    while (curLink->nextVirus != NULL) { // we do this becaue in their example file they printed froms start to finish 
+        curLink = curLink->nextVirus;    // so we want to keep this order in the linked list 
     }
     curLink->nextVirus = new_link;
     return virus_list;
