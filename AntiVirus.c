@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define SigNameLength 16
+
 typedef struct virus {
     unsigned short SigSize;
     unsigned char* VirusName;
@@ -13,45 +15,57 @@ typedef struct link {
     virus *vir;
 } link;
 
-void printVirus(virus* v, FILE* output) {
-    if (v != NULL) {
-        fprintf(output, "Virus name: %s\n", v->VirusName);
-        fprintf(output, "Virus size: %d\n", v->SigSize);
-        fprintf(output, "signature:\n");
-        for (int i = 0; i < v->SigSize; i++) {
-            fprintf(output, "%02X ", v->Sig[i]);
-        }
-        fprintf(output, "\n\n");
-    }
-}
+int big_endian = 0;
 
-virus* readVirus(FILE* f, int is_big_endian) {
+
+
+virus* readVirus(FILE* f) {
     virus* v = malloc(sizeof(virus));
     if (fread(&v->SigSize, 2, 1, f) != 1) {
         free(v);
         return NULL;
     }
-
-    if (is_big_endian) {
+    
+    if (big_endian) {
         v->SigSize = (v->SigSize << 8) | (v->SigSize >> 8);
     }
 
-    v->VirusName = malloc(16);
-    fread(v->VirusName, 16, 1, f);
-
+    v->VirusName = malloc(SigNameLength);
+    fread(v->VirusName, SigNameLength, 1, f);
     v->Sig = malloc(v->SigSize);
     fread(v->Sig, v->SigSize, 1, f);
 
     return v;
 }
 
-/* --- Linked List Functions --- */
+void printVirus(virus* virus, FILE* output) {
+    if (virus != NULL) {
+        fprintf(output, "Virus name: %s\n", virus->VirusName);
+        fprintf(output, "Virus size: %d\n", virus->SigSize);
+        fprintf(output, "signature:\n");
+        for (int i = 0; i < virus->SigSize; i++) {
+            fprintf(output, "%02X ", virus->Sig[i]);
+        }
+        fprintf(output, "\n\n");
+    }
+}
+
 
 link* list_append(link* virus_list, virus* data) {
     link* new_link = malloc(sizeof(link));
     new_link->vir = data;
-    new_link->nextVirus = virus_list;
-    return new_link;
+    new_link->nextVirus = NULL;
+
+    if (virus_list == NULL) {
+        return new_link;
+    }
+
+    link* curLink = virus_list;
+    while (curLink->nextVirus != NULL) { // we do this because we wanted it to match thier example output
+        curLink = curLink->nextVirus;
+    }
+    curLink->nextVirus = new_link;
+    return virus_list;
 }
 
 void list_print(link *virus_list, FILE* output) {
@@ -102,7 +116,7 @@ void neutralize_virus(char *fileName, int signatureOffset) {
     printf("Neutralized virus at offset %d\n", signatureOffset);
 }
 
-int get_endian(char* magic) {
+int get_big_endian(char* magic) {
     if (strncmp(magic, "VIRL", 4) == 0) 
         return 0;
     else if (strncmp(magic, "VIRB", 4) == 0)    
@@ -116,7 +130,6 @@ int main(int argc, char **argv) {
     char sigFileName[256];
     char inspectFileName[256] = "";
     link *virus_list = NULL;
-    int is_big_endian = 0;
 
     while (1) {
         printf("<L>oad signatures\n<P>rint signatures\n<S>elect file to inspect\n<D>etect viruses\n<F>ix file\n<Q>uit\n");
@@ -134,16 +147,20 @@ int main(int argc, char **argv) {
                 }
                 char magic[4];
                 fread(magic, 4, 1, f);
-                is_big_endian = get_endian(magic);
-                if (is_big_endian == -1) {
+                big_endian = get_big_endian(magic);
+                if (big_endian == -1) {
                     printf("Incorrect magic number.\n");
                     fclose(f);
                     break;
                 }
-                if (virus_list) list_free(virus_list);
+
+                if (virus_list != NULL){ 
+                    list_free(virus_list);
+                }
+
                 virus_list = NULL;
                 virus* v;
-                while ((v = readVirus(f, is_big_endian)) != NULL) {
+                while ((v = readVirus(f)) != NULL) {
                     virus_list = list_append(virus_list, v);
                 }
                 fclose(f);
