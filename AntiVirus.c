@@ -15,9 +15,14 @@ typedef struct link {
     virus *vir;
 } link;
 
+typedef struct {
+    char letter;
+    char *description;
+    void (*fun)(char*);
+} menu_item;
+
 int big_endian = 0;
-
-
+link *virus_list = NULL; // first virus in the list because we add to the end 
 
 virus* readVirus(FILE* f) {
     virus* v = malloc(sizeof(virus));
@@ -50,7 +55,6 @@ void printVirus(virus* virus, FILE* output) {
     }
 }
 
-
 link* list_append(link* virus_list, virus* data) {
     link* new_link = malloc(sizeof(link));
     new_link->vir = data;
@@ -61,7 +65,7 @@ link* list_append(link* virus_list, virus* data) {
     }
 
     link* curLink = virus_list;
-    while (curLink->nextVirus != NULL) { // we do this because we wanted it to match thier example output
+    while (curLink->nextVirus != NULL) {
         curLink = curLink->nextVirus;
     }
     curLink->nextVirus = new_link;
@@ -75,7 +79,7 @@ void list_print(link *virus_list, FILE* output) {
     }
 }
 
-void list_free(link *virus_list) {
+void list_free(link *virus_list) { 
     while (virus_list != NULL) {
         link* temp = virus_list;
         virus_list = virus_list->nextVirus;
@@ -85,8 +89,6 @@ void list_free(link *virus_list) {
         free(temp);
     }
 }
-
-/* --- Detection and Neutralization --- */
 
 void detect_virus(char *buffer, unsigned int size, link *virus_list) {
     for (unsigned int i = 0; i < size; i++) {
@@ -105,15 +107,15 @@ void detect_virus(char *buffer, unsigned int size, link *virus_list) {
 
 void neutralize_virus(char *fileName, int signatureOffset) {
     FILE* f = fopen(fileName, "r+b");
-    if (!f) {
-        perror("Error opening file for fixing");
+    if (f == NULL) {
+        printf("couldn't open file ");
         return;
     }
     fseek(f, signatureOffset, SEEK_SET);
     unsigned char ret = 0xC3; 
     fwrite(&ret, 1, 1, f);
     fclose(f);
-    printf("Neutralized virus at offset %d\n", signatureOffset);
+    printf("neutralized virus on offset  %d\n", signatureOffset);
 }
 
 int get_big_endian(char* magic) {
@@ -121,97 +123,112 @@ int get_big_endian(char* magic) {
         return 0;
     else if (strncmp(magic, "VIRB", 4) == 0)    
         return 1;
-
     return -1;
+}
+
+void load_signatures_wrapper(char* inspectFileName) {
+    char sigFileName[256];
+    printf("Enter signature file name: ");
+    fgets(sigFileName, sizeof(sigFileName), stdin);
+    sigFileName[strcspn(sigFileName, "\n")] = 0;
+    FILE* f = fopen(sigFileName, "rb");
+    if (f == NULL) {
+        printf("failed opening signatures\n");
+        return;
+    }
+    char magic[4];
+    fread(magic, 4, 1, f);
+    big_endian = get_big_endian(magic);
+    if (big_endian == -1) {
+        printf("bad magic number.\n");
+        fclose(f);
+        return;
+    }
+    if (virus_list != NULL) {
+        list_free(virus_list);
+    }
+    virus_list = NULL;
+    virus* v;
+    while ((v = readVirus(f)) != NULL) {
+        virus_list = list_append(virus_list, v);
+    }
+    fclose(f);
+}
+
+void print_signatures_wrapper(char* inspectFileName) {
+    if (virus_list) list_print(virus_list, stdout);
+}
+
+void select_file_wrapper(char* inspectFileName) {
+    printf("Enter file to inspect: ");
+    fgets(inspectFileName, 256, stdin);
+    inspectFileName[strcspn(inspectFileName, "\n")] = 0;
+}
+
+void detect_viruses_wrapper(char* inspectFileName) {
+    if (inspectFileName[0] == 0) {
+        printf("No file selected.\n");
+        return;
+    }
+    FILE* inf = fopen(inspectFileName, "rb");
+    if (!inf) {
+        printf("failed opening inspection file\n");
+        return;
+    }
+    char buffer[10000];
+    int n = fread(buffer, 1, 10000, inf);
+    detect_virus(buffer, n, virus_list);
+    fclose(inf);
+}
+
+void fix_file_wrapper(char* inspectFileName) {
+    if (inspectFileName[0] == 0 || !virus_list) return;
+    FILE* fixf = fopen(inspectFileName, "rb");
+    if (!fixf) return;
+    char fixBuf[10000];
+    int fixN = fread(fixBuf, 1, 10000, fixf);
+    fclose(fixf);
+    for (unsigned int i = 0; i < (unsigned int)fixN; i++) {
+        link* curr = virus_list;
+        while (curr != NULL) {
+            if (i + curr->vir->SigSize <= (unsigned int)fixN && memcmp(fixBuf + i, curr->vir->Sig, curr->vir->SigSize) == 0) {
+                neutralize_virus(inspectFileName, i);
+            }
+            curr = curr->nextVirus;
+        }
+    }
+}
+
+void quit_wrapper(char* inspectFileName) {
+    if (virus_list) list_free(virus_list);
+    exit(0);
 }
 
 int main(int argc, char **argv) {
     char choice[10];
-    char sigFileName[256];
     char inspectFileName[256] = "";
-    link *virus_list = NULL;
+
+    menu_item menu[] = {
+        {'L', "Load signatures", load_signatures_wrapper},
+        {'P', "Print signatures", print_signatures_wrapper},
+        {'S', "Select file to inspect", select_file_wrapper},
+        {'D', "Detect viruses", detect_viruses_wrapper},
+        {'F', "Fix file", fix_file_wrapper},
+        {'Q', "Quit", quit_wrapper},
+        {0, NULL, NULL}
+    };
 
     while (1) {
-        printf("<L>oad signatures\n<P>rint signatures\n<S>elect file to inspect\n<D>etect viruses\n<F>ix file\n<Q>uit\n");
-        if (!fgets(choice, sizeof(choice), stdin)) break;
-
-        switch (choice[0]) {
-            case 'L':
-                printf("Enter signature file name: ");
-                fgets(sigFileName, sizeof(sigFileName), stdin);
-                sigFileName[strcspn(sigFileName, "\n")] = 0;
-                FILE* f = fopen(sigFileName, "rb");
-                if (!f) {
-                    perror("Error opening signatures");
-                    break;
-                }
-                char magic[4];
-                fread(magic, 4, 1, f);
-                big_endian = get_big_endian(magic);
-                if (big_endian == -1) {
-                    printf("Incorrect magic number.\n");
-                    fclose(f);
-                    break;
-                }
-
-                if (virus_list != NULL){ 
-                    list_free(virus_list);
-                }
-
-                virus_list = NULL;
-                virus* v;
-                while ((v = readVirus(f)) != NULL) {
-                    virus_list = list_append(virus_list, v);
-                }
-                fclose(f);
+        for (int i = 0; menu[i].description != NULL; i++) {
+            printf("<%c>%s\n", menu[i].letter, menu[i].description + 1);
+        }
+        if (fgets(choice, sizeof(choice), stdin) == NULL) break;
+        
+        for (int i = 0; menu[i].description != NULL; i++) {
+            if (choice[0] == menu[i].letter) {
+                menu[i].fun(inspectFileName);
                 break;
-
-            case 'P':
-                if (virus_list) list_print(virus_list, stdout);
-                break;
-
-            case 'S':
-                printf("Enter file to inspect: ");
-                fgets(inspectFileName, sizeof(inspectFileName), stdin);
-                inspectFileName[strcspn(inspectFileName, "\n")] = 0;
-                break;
-
-            case 'D':
-                if (inspectFileName[0] == 0) {
-                    printf("No file selected.\n");
-                    break;
-                }
-                FILE* inf = fopen(inspectFileName, "rb");
-                if (!inf) {
-                    perror("Error opening inspection file");
-                    break;
-                }
-                char buffer[10000];
-                int n = fread(buffer, 1, 10000, inf);
-                detect_virus(buffer, n, virus_list);
-                fclose(inf);
-                break;
-
-            case 'F':
-                if (inspectFileName[0] == 0 || !virus_list) break;
-                FILE* fixf = fopen(inspectFileName, "rb");
-                char fixBuf[10000];
-                int fixN = fread(fixBuf, 1, 10000, fixf);
-                fclose(fixf);
-                for (unsigned int i = 0; i < fixN; i++) {
-                    link* curr = virus_list;
-                    while (curr != NULL) {
-                        if (i + curr->vir->SigSize <= fixN && memcmp(fixBuf + i, curr->vir->Sig, curr->vir->SigSize) == 0) {
-                            neutralize_virus(inspectFileName, i);
-                        }
-                        curr = curr->nextVirus;
-                    }
-                }
-                break;
-
-            case 'Q':
-                if (virus_list) list_free(virus_list);
-                return 0;
+            }
         }
     }
     return 0;
